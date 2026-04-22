@@ -19,6 +19,32 @@ from src.models import (
 console = Console()
 
 
+def _resolve_issue_type(issue: IssueInput, config: ProjectConfig) -> str:
+    """Resolve issue type from explicit type or hierarchy labels."""
+    if issue.type:
+        return issue.type
+
+    label_map = config.get_hierarchy_label_map()  # type_key -> hierarchy_label
+    matched_types = [
+        type_key for type_key, hierarchy_label in label_map.items()
+        if hierarchy_label in issue.labels
+    ]
+
+    if len(matched_types) == 1:
+        return matched_types[0]
+
+    if len(matched_types) == 0:
+        raise ValueError(
+            "Issue type could not be inferred from labels. "
+            "Provide 'type' or include exactly one hierarchy label."
+        )
+
+    raise ValueError(
+        "Issue type is ambiguous from labels. "
+        f"Matched multiple hierarchy labels for types: {', '.join(sorted(matched_types))}."
+    )
+
+
 def _run_gh(args: list[str], input_data: str | None = None) -> str:
     """Run a gh CLI command and return stdout."""
     cmd = ["gh"] + args
@@ -37,9 +63,14 @@ def _run_gh(args: list[str], input_data: str | None = None) -> str:
         raise
 
 
-def _build_issue_body(issue: IssueInput, config: ProjectConfig) -> str:
+def _build_issue_body(
+    issue: IssueInput,
+    config: ProjectConfig,
+    resolved_type: str | None = None,
+) -> str:
     """Build the full issue body by rendering the level's body template."""
-    level = config.get_level_for_type(issue.type)
+    type_key = resolved_type or issue.type
+    level = config.get_level_for_type(type_key) if type_key else None
     if not level or not level.body_template:
         # No template — just join body fields
         return "\n\n".join(f"{v}" for v in issue.body.values())
@@ -52,18 +83,33 @@ def _build_issue_body(issue: IssueInput, config: ProjectConfig) -> str:
     return body.strip()
 
 
-def _build_full_title(issue: IssueInput, config: ProjectConfig) -> str:
+def _build_full_title(
+    issue: IssueInput,
+    config: ProjectConfig,
+    resolved_type: str | None = None,
+) -> str:
     """Build the full title with type prefix from hierarchy level."""
-    level = config.get_level_for_type(issue.type)
+    type_key = resolved_type or issue.type
+    level = config.get_level_for_type(type_key) if type_key else None
     if level:
         return f"{level.title_prefix}{issue.title}"
     return issue.title
 
 
-def _merge_labels(issue: IssueInput, config: ProjectConfig) -> list[str]:
+def _merge_labels(
+    issue: IssueInput,
+    config: ProjectConfig,
+    resolved_type: str | None = None,
+) -> list[str]:
     """Merge explicit labels with level default labels (deduped)."""
     labels = list(issue.labels)
-    level = config.get_level_for_type(issue.type)
+    type_key = resolved_type or issue.type
+    if type_key:
+        hierarchy_label = config.get_hierarchy_label_for_type(type_key)
+        if hierarchy_label and hierarchy_label not in labels:
+            labels.append(hierarchy_label)
+
+    level = config.get_level_for_type(type_key) if type_key else None
     if level:
         for default_label in level.default_labels:
             if default_label not in labels:
@@ -71,9 +117,14 @@ def _merge_labels(issue: IssueInput, config: ProjectConfig) -> list[str]:
     return labels
 
 
-def _get_github_type(issue: IssueInput, config: ProjectConfig) -> str:
+def _get_github_type(
+    issue: IssueInput,
+    config: ProjectConfig,
+    resolved_type: str | None = None,
+) -> str:
     """Get the GitHub native issue type for this issue, if configured."""
-    level = config.get_level_for_type(issue.type)
+    type_key = resolved_type or issue.type
+    level = config.get_level_for_type(type_key) if type_key else None
     if level:
         return level.github_type
     return ""
@@ -106,15 +157,17 @@ def _check_duplicate(title: str, repo: str) -> bool:
 def create_single_issue(
     issue: IssueInput,
     config: ProjectConfig,
+    resolved_type: str | None = None,
     dry_run: bool = False,
     verbose: bool = False,
 ) -> CreatedIssue | None:
     """Create a single issue via gh CLI. Returns CreatedIssue or None on failure."""
     repo = config.repo_info.repo
-    title = _build_full_title(issue, config)
-    body = _build_issue_body(issue, config)
-    labels = _merge_labels(issue, config)
-    github_type = _get_github_type(issue, config)
+    resolved_type = resolved_type or _resolve_issue_type(issue, config)
+    title = _build_full_title(issue, config, resolved_type=resolved_type)
+    body = _build_issue_body(issue, config, resolved_type=resolved_type)
+    labels = _merge_labels(issue, config, resolved_type=resolved_type)
+    github_type = _get_github_type(issue, config, resolved_type=resolved_type)
 
     if dry_run:
         # Print the command that would be executed
@@ -142,7 +195,7 @@ def create_single_issue(
             number=0,
             url="(dry-run)",
             title=title,
-            type=issue.type,
+            type=resolved_type,
         )
 
     try:
@@ -194,7 +247,7 @@ def create_single_issue(
             number=number,
             url=url,
             title=title,
-            type=issue.type,
+            type=resolved_type,
         )
     except Exception as e:
         console.print(f"  [red]❌ Failed to create '{title}':[/red] {e}")
@@ -351,7 +404,14 @@ def _execute_issue_tree(
 ) -> None:
     """Recursively create an issue and its children, linking as we go."""
     repo = config.repo_info.repo
-    full_title = _build_full_title(issue, config)
+    try:
+        resolved_type = _resolve_issue_type(issue, config)
+    except ValueError as e:
+        console.print(f"  [red]❌ Failed to resolve type for '{issue.id}':[/red] {e}")
+        result.failed.append({"id": issue.id, "title": issue.title})
+        return
+
+    full_title = _build_full_title(issue, config, resolved_type=resolved_type)
 
     # Duplicate check
     if not dry_run and _check_duplicate(full_title, repo):
@@ -360,7 +420,13 @@ def _execute_issue_tree(
         return
 
     # Create the issue
-    created = create_single_issue(issue, config, dry_run=dry_run, verbose=verbose)
+    created = create_single_issue(
+        issue,
+        config,
+        resolved_type=resolved_type,
+        dry_run=dry_run,
+        verbose=verbose,
+    )
     if created is None:
         result.failed.append({"id": issue.id, "title": full_title})
         return
