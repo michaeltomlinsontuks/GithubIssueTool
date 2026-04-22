@@ -43,6 +43,7 @@ def config():
                     name="task",
                     can_have_children=[],
                     title_prefix="📋 ",
+                    hierarchy_label="backend",
                     default_labels=[],
                     github_type="Task",
                     body_template="## Task\n{description}",
@@ -51,6 +52,7 @@ def config():
                     name="bug",
                     can_have_children=[],
                     title_prefix="🐛 ",
+                    hierarchy_label="bug",
                     default_labels=["bug"],
                     github_type="Bug",
                     body_template="## Bug\n{description}\n\n## Steps\n{steps}",
@@ -152,3 +154,25 @@ def test_dry_run_creates_no_real_issues(config):
         mock_gh.assert_not_called()
         assert len(result.created) == 1
         assert result.created[0].number == 0
+
+
+def test_dry_run_infers_type_from_label(config):
+    """Test dry-run can infer type when type is omitted."""
+    data = {
+        "issues": [{
+            "id": "test",
+            "title": "Test",
+            "type": None,
+            "body": {"description": "Test"},
+            "labels": ["backend"],
+            "milestone": None,
+            "assignees": [],
+            "project": None,
+            "children": [],
+        }]
+    }
+    with patch("src.gh_executor._run_gh") as mock_gh:
+        result = execute_issues(data, config, dry_run=True)
+        mock_gh.assert_not_called()
+        assert len(result.created) == 1
+        assert result.created[0].type == "task"

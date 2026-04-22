@@ -45,6 +45,7 @@ hierarchy:
     - name: epic
       can_have_children: [story, task]
       title_prefix: "🏔️ "
+      hierarchy_label: "enhancement"
       default_labels: []
       github_type: ""
       body_template: "## Overview\\n{description}\\n\\n## Goals\\n{goals}"
@@ -52,6 +53,7 @@ hierarchy:
     - name: story
       can_have_children: [task, subtask]
       title_prefix: "📖 "
+      hierarchy_label: "frontend"
       default_labels: []
       github_type: "Feature"
       body_template: "## Story\\n{description}\\n\\n## AC\\n{acceptance_criteria}"
@@ -59,6 +61,7 @@ hierarchy:
     - name: task
       can_have_children: [subtask]
       title_prefix: "📋 "
+      hierarchy_label: "backend"
       default_labels: []
       github_type: "Task"
       body_template: "## Task\\n{description}"
@@ -66,12 +69,14 @@ hierarchy:
     - name: subtask
       can_have_children: []
       title_prefix: "🔹 "
+      hierarchy_label: "testing"
       default_labels: []
       body_template: "## Sub-task\\n{description}"
 
     - name: bug
       can_have_children: [subtask]
       title_prefix: "🐛 "
+      hierarchy_label: "bug"
       default_labels: [bug]
       github_type: "Bug"
       body_template: "## Bug\\n{description}\\n\\n## Steps\\n{steps}\\n\\n## Expected\\n{expected}"
@@ -146,6 +151,41 @@ def test_invalid_type(config):
     assert not result.is_valid
     assert any("tsk" in e.message for e in result.errors)
     assert any(e.suggestion and "task" in e.suggestion for e in result.errors)
+
+
+def test_infer_type_from_hierarchy_label(config):
+    """Test that missing type is inferred from hierarchy label."""
+    data = {"issues": [_make_issue({"type": None, "labels": ["backend"]})]}
+    result = validate_issues(data, config, check_duplicates=False)
+    assert result.is_valid
+
+
+def test_missing_type_without_hierarchy_label_errors(config):
+    """Test that missing type and missing hierarchy label fails."""
+    data = {"issues": [_make_issue({"type": None, "labels": ["security"]})]}
+    result = validate_issues(data, config, check_duplicates=False)
+    assert not result.is_valid
+    assert any("could not be inferred" in e.message for e in result.errors)
+
+
+def test_missing_type_with_ambiguous_hierarchy_labels_errors(config):
+    """Test that multiple hierarchy labels without type is ambiguous."""
+    data = {
+        "issues": [_make_issue({"type": None, "labels": ["backend", "frontend"]})]
+    }
+    result = validate_issues(data, config, check_duplicates=False)
+    assert not result.is_valid
+    assert any("ambiguous" in e.message for e in result.errors)
+
+
+def test_explicit_type_conflicts_with_hierarchy_label(config):
+    """Test explicit type must match provided hierarchy label."""
+    data = {
+        "issues": [_make_issue({"type": "task", "labels": ["frontend"]})]
+    }
+    result = validate_issues(data, config, check_duplicates=False)
+    assert not result.is_valid
+    assert any("implies type" in e.message for e in result.errors)
 
 
 def test_invalid_label(config):

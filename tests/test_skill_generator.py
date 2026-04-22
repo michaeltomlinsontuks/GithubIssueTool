@@ -40,6 +40,7 @@ hierarchy:
     - name: task
       can_have_children: []
       title_prefix: "📋 "
+      hierarchy_label: "backend"
       default_labels: []
       github_type: "Task"
       body_template: "## Task\\n{description}"
@@ -47,6 +48,7 @@ hierarchy:
     - name: bug
       can_have_children: []
       title_prefix: "🐛 "
+      hierarchy_label: "bug"
       default_labels: [bug]
       github_type: "Bug"
       body_template: "## Bug\\n{description}\\n## Steps\\n{steps}"

@@ -63,6 +63,7 @@ hierarchy:
     - name: epic
       can_have_children: [story, task]
       title_prefix: "🏔️ "
+      hierarchy_label: "enhancement"
       default_labels: []
       github_type: ""
       body_template: "## Overview\\n{description}\\n\\n## Goals\\n{goals}"
@@ -70,6 +71,7 @@ hierarchy:
     - name: story
       can_have_children: [task, subtask]
       title_prefix: "📖 "
+      hierarchy_label: "frontend"
       default_labels: []
       github_type: "Feature"
       body_template: "## Story\\n{description}\\n\\n## AC\\n{acceptance_criteria}"
@@ -77,6 +79,7 @@ hierarchy:
     - name: task
       can_have_children: [subtask]
       title_prefix: "📋 "
+      hierarchy_label: "backend"
       default_labels: []
       github_type: "Task"
       body_template: "## Task\\n{description}"
@@ -84,6 +87,7 @@ hierarchy:
     - name: subtask
       can_have_children: []
       title_prefix: "🔹 "
+      hierarchy_label: "testing"
       default_labels: []
       github_type: ""
       body_template: "## Sub-task\\n{description}"
@@ -91,6 +95,7 @@ hierarchy:
     - name: bug
       can_have_children: [subtask]
       title_prefix: "🐛 "
+      hierarchy_label: "bug"
       default_labels: [bug]
       github_type: "Bug"
       body_template: "## Bug\\n{description}\\n\\n## Steps\\n{steps}\\n\\n## Expected\\n{expected}"
@@ -161,6 +166,53 @@ def test_get_level_for_type(config_dir):
     assert level.title_prefix == "🐛 "
     assert level.github_type == "Bug"
     assert "bug" in level.default_labels
+
+
+def test_get_hierarchy_label_resolution(config_dir):
+    """Test hierarchy label resolution prefers explicit hierarchy_label."""
+    config = load_project_config(config_dir)
+    assert config.get_hierarchy_label_for_type("epic") == "enhancement"
+    assert config.get_hierarchy_label_for_type("story") == "frontend"
+    assert config.get_hierarchy_label_for_type("task") == "backend"
+    assert config.get_hierarchy_label_for_type("subtask") == "testing"
+    assert config.get_hierarchy_label_for_type("bug") == "bug"
+
+
+def test_hierarchy_missing_resolvable_label(config_dir):
+    """Test that a level with no resolvable hierarchy label is rejected."""
+    hierarchy_content = """\
+hierarchy:
+  levels:
+    - name: mystery
+      can_have_children: []
+      default_labels: []
+linking:
+  method: sub_issues
+"""
+    (config_dir / "hierarchy.yaml").write_text(hierarchy_content)
+
+    with pytest.raises(ValueError, match="no resolvable hierarchy label"):
+        load_project_config(config_dir)
+
+
+def test_hierarchy_duplicate_resolved_labels(config_dir):
+    """Test that two levels cannot resolve to the same hierarchy label."""
+    hierarchy_content = """\
+hierarchy:
+  levels:
+    - name: alpha
+      can_have_children: []
+      hierarchy_label: backend
+    - name: beta
+      can_have_children: []
+      hierarchy_label: backend
+linking:
+  method: sub_issues
+"""
+    (config_dir / "hierarchy.yaml").write_text(hierarchy_content)
+
+    with pytest.raises(ValueError, match="used by multiple levels"):
+        load_project_config(config_dir)
 
 
 def test_hierarchy_invalid_default_label(config_dir):

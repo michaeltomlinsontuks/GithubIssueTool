@@ -223,3 +223,22 @@ def test_gather_config_preserves_existing_hierarchy(mock_run, tmp_path):
 
     # hierarchy.yaml should be unchanged
     assert (config_path / "hierarchy.yaml").read_text() == original_content
+
+
+def test_hierarchy_template_includes_hierarchy_labels():
+    """Test starter hierarchy template includes hierarchy_label fields."""
+    from src.gather import _hierarchy_template
+
+    template = _hierarchy_template(
+        github_types=[{"name": "Task", "description": ""}],
+        labels=[
+            {"name": "epic", "color": "", "description": ""},
+            {"name": "story", "color": "", "description": ""},
+            {"name": "task", "color": "", "description": ""},
+            {"name": "subtask", "color": "", "description": ""},
+        ],
+    )
+
+    assert "hierarchy_label:" in template
+    assert 'hierarchy_label: "epic"' in template
+    assert 'hierarchy_label: "story"' in template
