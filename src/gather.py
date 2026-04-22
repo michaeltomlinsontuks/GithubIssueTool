@@ -218,16 +218,25 @@ def _hierarchy_template(github_types: list[dict], labels: list[dict]) -> str:
 
     # Build a comment listing available labels for reference
     label_names = [l["name"] for l in labels]
+    label_set = set(label_names)
     labels_comment = ", ".join(label_names) if label_names else "(none found)"
 
+    epic_label = "epic" if "epic" in label_set else ""
+    story_label = "story" if "story" in label_set else ""
+    task_label = "task" if "task" in label_set else ""
+    subtask_label = "subtask" if "subtask" in label_set else ""
+    bug_label = "bug" if "bug" in label_set else ""
+    chore_label = "chore" if "chore" in label_set else ""
+
     return f"""\
-# Issue hierarchy — defines parent-child relationships AND type configuration
+# Issue hierarchy — defines parent-child relationships AND level configuration
 # This file is user-editable and is NOT overwritten by gather-config.
 #
 # Each level defines:
-#   - name: the type key used in AI-generated JSON
+#   - name: the hierarchy level key used in AI-generated JSON
 #   - can_have_children: which levels can be nested under this one
 #   - title_prefix: emoji/text prepended to issue titles
+#   - hierarchy_label: canonical label that identifies this level
 #   - default_labels: labels automatically applied (must exist in labels.yaml)
 #   - github_type: maps to a GitHub native issue type (must exist in types.yaml)
 #   - body_template: markdown template with {{field_name}} placeholders
@@ -242,6 +251,7 @@ hierarchy:
         - story
         - task
       title_prefix: "🏔️ "
+      hierarchy_label: "{epic_label}"
       default_labels: []
       github_type: ""
       body_template: |
@@ -256,6 +266,7 @@ hierarchy:
         - task
         - subtask
       title_prefix: "📖 "
+      hierarchy_label: "{story_label}"
       default_labels: []
       github_type: "{feature_type}"
       body_template: |
@@ -269,6 +280,7 @@ hierarchy:
       can_have_children:
         - subtask
       title_prefix: "📋 "
+      hierarchy_label: "{task_label}"
       default_labels: []
       github_type: "{task_type}"
       body_template: |
@@ -278,6 +290,7 @@ hierarchy:
     - name: subtask
       can_have_children: []
       title_prefix: "🔹 "
+      hierarchy_label: "{subtask_label}"
       default_labels: []
       github_type: ""
       body_template: |
@@ -288,6 +301,7 @@ hierarchy:
       can_have_children:
         - subtask
       title_prefix: "🐛 "
+      hierarchy_label: "{bug_label}"
       default_labels: []
       github_type: "{bug_type}"
       body_template: |
@@ -304,6 +318,7 @@ hierarchy:
       can_have_children:
         - subtask
       title_prefix: "🔧 "
+      hierarchy_label: "{chore_label}"
       default_labels: []
       github_type: "{task_type}"
       body_template: |
@@ -415,7 +430,7 @@ def gather_config(repo: str, config_dir: str = "./config") -> None:
         f"\n   Config directory: [cyan]{config_path.resolve()}[/cyan]"
         f"\n"
         f"\n[bold yellow]Next steps:[/bold yellow]"
-        f"\n   1. Review and edit [cyan]hierarchy.yaml[/cyan] — customise issue types, body templates, hierarchy, and labels"
+        f"\n   1. Review and edit [cyan]hierarchy.yaml[/cyan] — customise hierarchy levels, body templates, and labels"
         f"\n   2. Run [cyan]generate-skill[/cyan] to create the AI skill prompt"
         f"\n"
     )
