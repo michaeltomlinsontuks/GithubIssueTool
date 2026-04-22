@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GitHub Issue Tool Input",
+  "description": "Schema for AI-generated issue JSON consumed by the GitHub Issue Tool",
+  "type": "object",
+  "required": ["issues"],
+  "properties": {
+    "issues": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Top-level issues (roots of the hierarchy tree)",
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    }
+  },
+  "$defs": {
+    "issue": {
+      "type": "object",
+      "required": ["id", "title", "type", "body"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique local ID for this issue (not sent to GitHub)"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Issue title without type prefix"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Issue type key from types.yaml"
+        },
+        "body": {
+          "type": "object",
+          "description": "Body fields matching template placeholders for this type",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional label names from labels.yaml"
+        },
+        "milestone": {
+          "type": ["string", "null"],
+          "description": "Exact milestone title from milestones.yaml"
+        },
+        "assignees": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "GitHub usernames from assignees.yaml"
+        },
+        "project": {
+          "type": ["integer", "null"],
+          "description": "Project board number from repo.yaml"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          },
+          "default": [],
+          "description": "Child issues (recursive tree structure)"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

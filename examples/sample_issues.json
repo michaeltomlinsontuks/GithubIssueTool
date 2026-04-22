@@ -1,0 +1,103 @@
+{
+  "issues": [
+    {
+      "id": "auth-epic",
+      "title": "User Authentication System",
+      "type": "epic",
+      "body": {
+        "description": "Implement complete user authentication including JWT, OAuth, and session management.",
+        "goals": "- Secure API access\n- Support OAuth2 providers\n- Token refresh flow\n- Role-based permissions"
+      },
+      "labels": ["backend"],
+      "milestone": "MVP Release",
+      "assignees": ["michaeltomlinsontuks"],
+      "project": 1,
+      "children": [
+        {
+          "id": "auth-login-story",
+          "title": "Login Flow",
+          "type": "story",
+          "body": {
+            "description": "As a user, I want to log in with my credentials so I can access my account.",
+            "acceptance_criteria": "- [ ] POST /auth/login returns JWT\n- [ ] Invalid credentials return 401\n- [ ] Rate limiting on login endpoint"
+          },
+          "labels": ["backend"],
+          "milestone": "MVP Release",
+          "assignees": ["michaeltomlinsontuks"],
+          "project": null,
+          "children": [
+            {
+              "id": "auth-login-endpoint",
+              "title": "Implement POST /auth/login endpoint",
+              "type": "task",
+              "body": {
+                "description": "Create the login endpoint that validates credentials against the database and returns a signed JWT pair (access + refresh token)."
+              },
+              "labels": ["backend"],
+              "milestone": "MVP Release",
+              "assignees": ["michaeltomlinsontuks"],
+              "project": null,
+              "children": []
+            },
+            {
+              "id": "auth-login-tests",
+              "title": "Write login endpoint tests",
+              "type": "subtask",
+              "body": {
+                "description": "Unit and integration tests for the login endpoint covering success, invalid credentials, rate limiting, and edge cases."
+              },
+              "labels": ["testing"],
+              "milestone": null,
+              "assignees": [],
+              "project": null,
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "auth-register-story",
+          "title": "Registration Flow",
+          "type": "story",
+          "body": {
+            "description": "As a new user, I want to register an account so I can start using the application.",
+            "acceptance_criteria": "- [ ] POST /auth/register creates user\n- [ ] Email validation\n- [ ] Password strength requirements\n- [ ] Duplicate email detection"
+          },
+          "labels": ["backend"],
+          "milestone": "MVP Release",
+          "assignees": [],
+          "project": null,
+          "children": [
+            {
+              "id": "auth-register-endpoint",
+              "title": "Implement POST /auth/register endpoint",
+              "type": "task",
+              "body": {
+                "description": "Create the registration endpoint with email validation, password hashing, and duplicate detection."
+              },
+              "labels": [],
+              "milestone": "MVP Release",
+              "assignees": [],
+              "project": null,
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dark-mode-bug",
+      "title": "Fix dark mode toggle persistence",
+      "type": "bug",
+      "body": {
+        "description": "Dark mode resets to light mode on page refresh.",
+        "steps": "1. Enable dark mode via the toggle\n2. Refresh the page\n3. Observe that light mode is active",
+        "expected": "Dark mode preference should persist across page refreshes using localStorage."
+      },
+      "labels": ["frontend"],
+      "milestone": "MVP Release",
+      "assignees": ["michaeltomlinsontuks"],
+      "project": null,
+      "children": []
+    }
+  ]
+}
