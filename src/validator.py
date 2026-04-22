@@ -32,6 +32,53 @@ def _extract_template_fields(template: str) -> set[str]:
     return set(re.findall(r"\{(\w+)\}", template))
 
 
+def _schema_error_suggestion(error: jsonschema.ValidationError) -> str | None:
+    """Provide actionable suggestions for common schema mistakes."""
+    message = error.message
+
+    if error.validator == "additionalProperties":
+        match = re.search(r"'([^']+)' was unexpected", message)
+        unexpected = match.group(1) if match else None
+
+        if unexpected == "assignee":
+            return "Use 'assignees' (array of usernames), e.g. \"assignees\": [\"alice\"]."
+        if unexpected in {"point", "points", "story_points", "estimate"}:
+            return (
+                "Story points are not part of the schema. Move effort info into body text "
+                "or a label like 'estimate:3'."
+            )
+        return "Remove unsupported keys. Only use: id, title, type, body, labels, milestone, assignees, project, children."
+
+    if error.validator == "type":
+        expected = error.validator_value
+        path = list(error.absolute_path)
+
+        if expected == "string" and path and "body" in path:
+            if isinstance(error.instance, list):
+                return "This body field must be a string. Convert the list into markdown bullets in a single string."
+            if isinstance(error.instance, dict):
+                return "This body field must be a string. Flatten the object into markdown text in a single string value."
+
+        if expected == "object" and path and path[-1] == "body":
+            return "Issue body must be an object of template fields, e.g. \"body\": {\"description\": \"...\"}."
+
+    return None
+
+
+def validate_structure_detailed(
+    data: dict,
+    schema_path: Path,
+) -> list[tuple[str, str | None]]:
+    """Validate JSON data against schema and include suggestions."""
+    schema = _load_json_schema(schema_path)
+    validator = jsonschema.Draft7Validator(schema)
+    errors: list[tuple[str, str | None]] = []
+    for error in sorted(validator.iter_errors(data), key=lambda e: list(e.path)):
+        path_str = " → ".join(str(p) for p in error.absolute_path) or "(root)"
+        errors.append((f"[{path_str}] {error.message}", _schema_error_suggestion(error)))
+    return errors
+
+
 def _matched_hierarchy_types_from_labels(
     issue: IssueInput,
     config: ProjectConfig,
@@ -82,13 +129,7 @@ def _resolve_issue_type(issue: IssueInput, config: ProjectConfig) -> tuple[str |
 
 def validate_structure(data: dict, schema_path: Path) -> list[str]:
     """Validate JSON data against the JSON Schema. Returns list of error messages."""
-    schema = _load_json_schema(schema_path)
-    validator = jsonschema.Draft7Validator(schema)
-    errors = []
-    for error in sorted(validator.iter_errors(data), key=lambda e: list(e.path)):
-        path_str = " → ".join(str(p) for p in error.absolute_path) or "(root)"
-        errors.append(f"[{path_str}] {error.message}")
-    return errors
+    return [message for message, _ in validate_structure_detailed(data, schema_path)]
 
 
 # ─── Duplicate Detection ────────────────────────────────────────────────────
@@ -335,12 +376,13 @@ def validate_issues(
 
     # Pass 1: Structural validation
     if schema_path and schema_path.exists():
-        structural_errors = validate_structure(data, schema_path)
-        for err_msg in structural_errors:
+        structural_errors = validate_structure_detailed(data, schema_path)
+        for err_msg, suggestion in structural_errors:
             result.add_error(
                 issue_id="(schema)",
                 field="structure",
                 message=err_msg,
+                suggestion=suggestion,
             )
         if structural_errors:
             # Don't continue to semantic validation if structure is broken

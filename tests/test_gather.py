@@ -30,11 +30,12 @@ def _mock_run_result(stdout="", returncode=0):
 def test_gather_repo_info(mock_run):
     """Test that gather_repo_info parses gh repo view output."""
     mock_run.return_value = _mock_run_result(
-        json.dumps({"name": "repo", "owner": {"login": "owner"}})
+        json.dumps({"name": "repo", "owner": {"login": "owner", "type": "Organization"}})
     )
     result = gather_repo_info("owner/repo")
     assert result["repo"] == "owner/repo"
     assert result["owner"] == "owner"
+    assert result["owner_type"] == "Organization"
 
 
 @patch("src.gather.subprocess.run")
@@ -115,12 +116,47 @@ def test_gather_projects(mock_run):
 
 
 @patch("src.gather.subprocess.run")
+def test_gather_projects_for_user_owner(mock_run):
+    """Test that user-owned projects are parsed from gh api graphql output."""
+    mock_run.return_value = _mock_run_result(
+        json.dumps({
+            "data": {
+                "user": {
+                    "projectsV2": {
+                        "nodes": [
+                            {"number": 3, "title": "repo"},
+                            {"number": 4, "title": "other_repo"}
+                        ],
+                        "pageInfo": {
+                            "hasNextPage": False,
+                            "endCursor": None
+                        }
+                    }
+                }
+            }
+        })
+    )
+    result = gather_projects_by_title("owner/repo", "owner", "User")
+    assert len(result) == 1
+    assert result[0]["title"] == "repo"
+    assert result[0]["number"] == 3
+
+
+@patch("src.gather.subprocess.run")
+def test_gather_issue_types_user_owner_returns_empty(mock_run):
+    """User-owned repos should skip org issue types endpoint."""
+    result = gather_issue_types("owner/repo", "User")
+    assert result == []
+    mock_run.assert_not_called()
+
+
+@patch("src.gather.subprocess.run")
 def test_gather_config_creates_files(mock_run, tmp_path):
     """Test that gather_config creates all expected files."""
     def side_effect(cmd, **kwargs):
         cmd_str = " ".join(cmd)
-        if "repo view" in cmd_str:
-            return _mock_run_result(json.dumps({"name": "repo", "owner": {"login": "owner"}}))
+        if "api repos/owner/repo" in cmd_str:
+            return _mock_run_result(json.dumps({"name": "repo", "owner": {"login": "owner", "type": "Organization"}}))
         elif "graphql" in cmd_str:
             return _mock_run_result(json.dumps({
                 "data": {"organization": {"projectsV2": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}
@@ -166,8 +202,8 @@ def test_gather_config_always_overwrites_types(mock_run, tmp_path):
 
     def side_effect(cmd, **kwargs):
         cmd_str = " ".join(cmd)
-        if "repo view" in cmd_str:
-            return _mock_run_result(json.dumps({"name": "repo", "owner": {"login": "owner"}}))
+        if "api repos/owner/repo" in cmd_str:
+            return _mock_run_result(json.dumps({"name": "repo", "owner": {"login": "owner", "type": "Organization"}}))
         elif "graphql" in cmd_str:
             return _mock_run_result(json.dumps({
                 "data": {"organization": {"projectsV2": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}
@@ -202,8 +238,8 @@ def test_gather_config_preserves_existing_hierarchy(mock_run, tmp_path):
 
     def side_effect(cmd, **kwargs):
         cmd_str = " ".join(cmd)
-        if "repo view" in cmd_str:
-            return _mock_run_result(json.dumps({"name": "repo", "owner": {"login": "owner"}}))
+        if "api repos/owner/repo" in cmd_str:
+            return _mock_run_result(json.dumps({"name": "repo", "owner": {"login": "owner", "type": "Organization"}}))
         elif "graphql" in cmd_str:
             return _mock_run_result(json.dumps({
                 "data": {"organization": {"projectsV2": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}

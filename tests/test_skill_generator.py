@@ -123,3 +123,13 @@ def test_generate_skill_contains_constraints(config):
     prompt = generate_skill_prompt(config)
     assert "Constraints" in prompt
     assert "Only use valid values" in prompt
+
+
+def test_generate_skill_contains_schema_guardrails(config):
+    """Test that the skill prompt includes strict schema guardrails."""
+    prompt = generate_skill_prompt(config)
+    assert "Hard Schema Guardrails" in prompt
+    assert "assignee" in prompt
+    assert "points" in prompt
+    assert "body" in prompt
+    assert "every value is a string" in prompt

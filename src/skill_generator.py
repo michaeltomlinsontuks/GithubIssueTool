@@ -66,7 +66,7 @@ def _sample_body_for_level(level_name: str, config: ProjectConfig) -> dict[str, 
     """Build a sample body object for a level using its template fields."""
     level = config.hierarchy.get_level(level_name)
     if not level or not level.body_template:
-        return {}
+        return {"description": "Example description"}
 
     fields = _extract_template_fields(level.body_template)
     body: dict[str, str] = {}
@@ -225,6 +225,24 @@ before or after the JSON block.
 }}
 ```
 
+### Hard Schema Guardrails (must follow)
+
+- Use **only** these issue keys: `id`, `title`, `type`, `body`, `labels`, `milestone`, `assignees`, `project`, `children`.
+- Do **not** use unsupported keys such as `assignee`, `point`, `points`, `story_points`, `estimate`.
+- `body` must be an object where **every value is a string**.
+- Do not use arrays/objects inside `body` values. Convert checklists and DoD into markdown strings.
+
+Example (valid):
+```json
+{{
+  "body": {{
+    "description": "Implement login flow",
+    "acceptance_criteria": "- [ ] User can log in\\n- [ ] Invalid credentials show error",
+    "definition_of_done": "- Code reviewed\\n- Tests passing"
+  }}
+}}
+```
+
 ## Field Reference
 
 | Field | Type | Required | Description |
@@ -308,6 +326,9 @@ Use `null` if the issue doesn't belong to a project.
 7. **Markdown in body fields** — Use Markdown formatting (checklists, headers, etc.)
    in body field values.
 8. **Use kebab-case IDs** — e.g., `auth-login-endpoint`, not `authLoginEndpoint`.
+9. **No unsupported fields** — Never emit `assignee` or `points`; use `assignees` and allowed schema keys only.
+10. **Body values are strings only** — Flatten arrays/objects into markdown text in a single string value.
+11. **Pre-flight self-check** — Before final output, verify every issue object has only allowed keys and each `body` value is a string.
 
 ---
 

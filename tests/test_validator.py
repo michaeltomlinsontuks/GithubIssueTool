@@ -326,3 +326,40 @@ def test_json_schema_validation():
     invalid_data2 = {"issues": []}
     errors = validate_structure(invalid_data2, schema_path)
     assert len(errors) > 0
+
+
+def test_schema_suggestion_for_assignee_key(config):
+    """Schema errors should suggest assignees[] for legacy assignee key."""
+    schema_path = Path(__file__).parent.parent / "schemas" / "issues_schema.json"
+    data = {
+        "issues": [
+            {
+                "id": "x",
+                "title": "X",
+                "type": "task",
+                "body": {"description": "ok"},
+                "assignee": "alice",
+            }
+        ]
+    }
+    result = validate_issues(data, config, schema_path=schema_path, check_duplicates=False)
+    assert not result.is_valid
+    assert any(e.suggestion and "assignees" in e.suggestion for e in result.errors)
+
+
+def test_schema_suggestion_for_non_string_body_value(config):
+    """Schema errors should suggest flattening non-string body values."""
+    schema_path = Path(__file__).parent.parent / "schemas" / "issues_schema.json"
+    data = {
+        "issues": [
+            {
+                "id": "x",
+                "title": "X",
+                "type": "task",
+                "body": {"description": ["a", "b"]},
+            }
+        ]
+    }
+    result = validate_issues(data, config, schema_path=schema_path, check_duplicates=False)
+    assert not result.is_valid
+    assert any(e.suggestion and "must be a string" in e.suggestion for e in result.errors)

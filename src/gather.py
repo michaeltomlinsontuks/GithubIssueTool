@@ -41,12 +41,15 @@ def _run_gh_json(args: list[str], repo: str | None = None, input_data: str | Non
 
 
 def gather_repo_info(repo: str) -> dict:
-    """Fetch repo name and owner."""
-    data = _run_gh_json(["repo", "view", repo, "--json", "name,owner"])
-    owner = data.get("owner", {}).get("login", repo.split("/")[0])
+    """Fetch repo name, owner, and owner type."""
+    data = _run_gh_json(["api", f"repos/{repo}"])
+    owner_data = data.get("owner", {})
+    owner = owner_data.get("login", repo.split("/")[0])
+    owner_type = owner_data.get("type", "Organization")
     return {
         "repo": repo,
         "owner": owner,
+        "owner_type": owner_type,
     }
 
 
@@ -100,17 +103,32 @@ def gather_assignees(repo: str) -> list[str]:
         return []
 
 
-def gather_projects_by_title(repo: str, org: str) -> list[dict]:
+def gather_projects_by_title(
+    repo: str,
+    owner: str,
+    owner_type: str = "Organization",
+) -> list[dict]:
     """
-    Find org-owned ProjectsV2 whose title matches the repo name.
+    Find owner-owned ProjectsV2 whose title matches the repo name.
     Requires you to enforce naming convention: project title == repo.
+
+    For organization repos, queries `organization(login: ...)`.
+    For user repos, queries `user(login: ...)`.
     """
     try:
         _owner, repo_name = repo.split("/", 1)
 
+        owner_type_lower = owner_type.lower()
+        if owner_type_lower == "organization":
+            root_field = "organization"
+        elif owner_type_lower == "user":
+            root_field = "user"
+        else:
+            return []
+
         query = (
-            "query($org: String!, $after: String) {"
-            "  organization(login: $org) {"
+            "query($owner: String!, $after: String) {"
+            f"  {root_field}(login: $owner) {{"
             "    projectsV2(first: 50, after: $after) {"
             "      nodes { number title }"
             "      pageInfo { hasNextPage endCursor }"
@@ -126,18 +144,18 @@ def gather_projects_by_title(repo: str, org: str) -> list[dict]:
             cmd_args = [
                 "api", "graphql",
                 "-f", f"query={query}",
-                "-f", f"org={org}",
+                "-f", f"owner={owner}",
             ]
             if after:
                 cmd_args.extend(["-f", f"after={after}"])
 
             data = _run_gh_json(cmd_args)
 
-            org_data = (data or {}).get("data", {}).get("organization")
-            if not org_data:
+            owner_data = (data or {}).get("data", {}).get(root_field)
+            if not owner_data:
                 return []
 
-            pv2 = org_data["projectsV2"]
+            pv2 = owner_data["projectsV2"]
             for n in (pv2.get("nodes") or []):
                 if not n:
                     continue
@@ -152,15 +170,18 @@ def gather_projects_by_title(repo: str, org: str) -> list[dict]:
         return matches
 
     except (subprocess.CalledProcessError, json.JSONDecodeError, ValueError):
-        console.print("[yellow]Warning: Could not fetch org projects[/yellow]")
+        console.print("[yellow]Warning: Could not fetch projects[/yellow]")
         return []
 
-def gather_issue_types(repo: str) -> list[dict]:
+def gather_issue_types(repo: str, owner_type: str = "Organization") -> list[dict]:
     """Fetch native GitHub issue types available for this repo.
 
     Issue types are defined at the org level. We try the org endpoint first;
     if the repo owner is not an org, we return an empty list.
     """
+    if owner_type.lower() != "organization":
+        return []
+
     try:
         owner = repo.split("/")[0]
         output = _run_gh(
@@ -358,10 +379,11 @@ def gather_config(repo: str, config_dir: str = "./config") -> None:
     console.print("  📦 Fetching repo info...")
     repo_data = gather_repo_info(repo)
     owner = repo_data["owner"]
+    owner_type = repo_data.get("owner_type", "Organization")
 
     # 2. Projects
     console.print("  📋 Fetching projects...")
-    projects = gather_projects_by_title(repo, owner)
+    projects = gather_projects_by_title(repo, owner, owner_type)
     repo_data["projects"] = projects
     _write_yaml(
         config_path / "repo.yaml",
@@ -402,7 +424,7 @@ def gather_config(repo: str, config_dir: str = "./config") -> None:
 
     # 6. GitHub native issue types — ALWAYS OVERWRITTEN (like labels)
     console.print("  🔖 Fetching issue types...")
-    github_types = gather_issue_types(repo)
+    github_types = gather_issue_types(repo, owner_type)
     types_data = [
         {"name": t["name"], "description": t.get("description", "")}
         for t in github_types
