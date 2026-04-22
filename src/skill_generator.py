@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -19,17 +20,20 @@ def _extract_template_fields(template: str) -> list[str]:
 
 
 def _generate_types_table(config: ProjectConfig) -> str:
-    """Generate a markdown table of available issue types (hierarchy levels)."""
+    """Generate a markdown table of hierarchy levels and labels."""
     lines = [
-        "| Type Key | GitHub Type | Default Labels | Body Fields |",
-        "|----------|-------------|----------------|-------------|",
+        "| Level Key | Hierarchy Label | GitHub Type | Default Labels | Body Fields |",
+        "|-----------|-----------------|-------------|----------------|-------------|",
     ]
     for level in config.hierarchy.levels:
+        hierarchy_label = config.get_hierarchy_label_for_type(level.name) or "—"
         gh_type = level.github_type if level.github_type else "—"
         labels_str = ", ".join(level.default_labels) if level.default_labels else "*(none)*"
         fields = _extract_template_fields(level.body_template) if level.body_template else []
         fields_str = ", ".join(fields) if fields else "*(none)*"
-        lines.append(f"| `{level.name}` | {gh_type} | {labels_str} | {fields_str} |")
+        lines.append(
+            f"| `{level.name}` | `{hierarchy_label}` | {gh_type} | {labels_str} | {fields_str} |"
+        )
     return "\n".join(lines)
 
 
@@ -58,6 +62,91 @@ def _generate_body_templates(config: ProjectConfig) -> str:
     return "\n\n".join(sections)
 
 
+def _sample_body_for_level(level_name: str, config: ProjectConfig) -> dict[str, str]:
+    """Build a sample body object for a level using its template fields."""
+    level = config.hierarchy.get_level(level_name)
+    if not level or not level.body_template:
+        return {}
+
+    fields = _extract_template_fields(level.body_template)
+    body: dict[str, str] = {}
+    for field in fields:
+        if "acceptance" in field.lower() or "criteria" in field.lower():
+            body[field] = "- [ ] Example acceptance criterion"
+        elif "steps" in field.lower():
+            body[field] = "1. Example step"
+        else:
+            body[field] = f"Example {field.replace('_', ' ')}"
+    return body
+
+
+def _build_example_json(config: ProjectConfig) -> str:
+    """Build a config-driven example JSON snippet.
+
+    Avoids hard-coding level names (epic/story/task/etc.) so the example remains
+    valid for custom hierarchies.
+    """
+    levels = config.hierarchy.levels
+    if not levels:
+        fallback = {
+            "issues": [
+                {
+                    "id": "example-issue",
+                    "title": "Example Issue",
+                    "type": None,
+                    "body": {},
+                    "labels": [],
+                    "milestone": None,
+                    "assignees": [],
+                    "project": None,
+                    "children": [],
+                }
+            ]
+        }
+        return json.dumps(fallback, indent=2)
+
+    # Build a simple chain up to 3 levels deep using can_have_children.
+    chain: list[str] = [levels[0].name]
+    while len(chain) < 3:
+        current = config.hierarchy.get_level(chain[-1])
+        if not current or not current.can_have_children:
+            break
+        child_name = current.can_have_children[0]
+        if config.hierarchy.get_level(child_name) is None:
+            break
+        chain.append(child_name)
+
+    # Build from leaf upward.
+    child_payload: list[dict] = []
+    for idx in range(len(chain) - 1, -1, -1):
+        level_name = chain[idx]
+
+        issue_type: str | None = level_name
+        labels: list[str] = []
+
+        # Demonstrate label-driven inference on the leaf, when possible.
+        if idx == len(chain) - 1:
+            hierarchy_label = config.get_hierarchy_label_for_type(level_name)
+            if hierarchy_label:
+                issue_type = None
+                labels = [hierarchy_label]
+
+        issue = {
+            "id": f"example-{level_name}",
+            "title": f"Example {level_name.replace('_', ' ').title()}",
+            "type": issue_type,
+            "body": _sample_body_for_level(level_name, config),
+            "labels": labels,
+            "milestone": config.milestones.milestones[0] if idx == 0 and config.milestones.milestones else None,
+            "assignees": [config.assignees.assignees[0]] if idx == 0 and config.assignees.assignees else [],
+            "project": config.repo_info.projects[0].number if idx == 0 and config.repo_info.projects else None,
+            "children": child_payload,
+        }
+        child_payload = [issue]
+
+    return json.dumps({"issues": child_payload}, indent=2)
+
+
 def generate_skill_prompt(config: ProjectConfig) -> str:
     """Generate the full AI skill prompt markdown."""
     repo = config.repo_info.repo
@@ -84,13 +173,20 @@ def generate_skill_prompt(config: ProjectConfig) -> str:
     types_table = _generate_types_table(config)
     hierarchy_rules = _generate_hierarchy_rules(config)
     body_templates = _generate_body_templates(config)
+    example_json = _build_example_json(config)
+    hierarchy_labels_map = config.get_hierarchy_label_map()
+    hierarchy_labels_list = "\n".join(
+        f"- `{level}` → `{label}`" for level, label in sorted(hierarchy_labels_map.items())
+    )
+    if not hierarchy_labels_list:
+        hierarchy_labels_list = "*(no hierarchy labels configured)*"
 
     prompt = f"""\
 # GitHub Issue Planner — AI Skill
 
 You are a GitHub issue planner for the **{repo}** project. Your job is to break down
 work into well-structured GitHub issues following the project's configured hierarchy
-and issue types.
+and hierarchy labels.
 
 ## Output Format
 
@@ -103,7 +199,7 @@ before or after the JSON block.
     {{
       "id": "unique-local-id",
       "title": "Issue title (without type prefix — the tool adds it)",
-      "type": "type_key",
+      "type": "level_key_or_null",
       "body": {{
         "field_name": "field value"
       }},
@@ -135,9 +231,9 @@ before or after the JSON block.
 |-------|------|----------|-------------|
 | `id` | string | ✅ | Unique local ID for this issue (not sent to GitHub). Use kebab-case. |
 | `title` | string | ✅ | Issue title. Do NOT include type prefixes (emojis) — the tool adds them. |
-| `type` | string | ✅ | Must be one of the type keys listed below. |
+| `type` | string\\|null | ❌ | Optional hierarchy level key. If omitted, the tool infers level from hierarchy labels. |
 | `body` | object | ✅ | Key-value pairs matching the body template fields for this type. |
-| `labels` | string[] | ❌ | Additional labels. Type default labels are added automatically. |
+| `labels` | string[] | ❌ | Additional labels. Level default labels are added automatically. |
 | `milestone` | string | ❌ | Exact milestone title. Use `null` if not applicable. |
 | `assignees` | string[] | ❌ | GitHub usernames. Use `[]` if no assignee. |
 | `project` | int | ❌ | Project board number. Use `null` if not applicable. |
@@ -145,9 +241,15 @@ before or after the JSON block.
 
 ---
 
-## Available Issue Types
+## Available Hierarchy Levels
 
 {types_table}
+
+## Hierarchy Labels
+
+These labels define hierarchy semantics. In label-driven mode, include exactly one hierarchy label per issue:
+
+{hierarchy_labels_list}
 
 ## Body Templates
 
@@ -198,66 +300,21 @@ Use `null` if the issue doesn't belong to a project.
 
 1. **Only use valid values** — Every type, label, milestone, assignee, and project
    must come from the lists above.
-2. **Follow hierarchy rules** — Parent-child relationships must be valid.
-3. **Fill all body fields** — Every field in the type's body template must be provided.
-4. **Unique IDs** — Every `id` must be unique across the entire JSON.
-5. **No title prefixes** — Do not add emoji prefixes to titles; the tool does this.
-6. **Markdown in body fields** — Use Markdown formatting (checklists, headers, etc.)
+2. **Hierarchy is label-driven** — Include exactly one hierarchy label per issue (or provide `type`).
+3. **Follow hierarchy rules** — Parent-child relationships must be valid.
+4. **Fill all body fields** — Every field in the type's body template must be provided.
+5. **Unique IDs** — Every `id` must be unique across the entire JSON.
+6. **No title prefixes** — Do not add emoji prefixes to titles; the tool does this.
+7. **Markdown in body fields** — Use Markdown formatting (checklists, headers, etc.)
    in body field values.
-7. **Use kebab-case IDs** — e.g., `auth-login-endpoint`, not `authLoginEndpoint`.
+8. **Use kebab-case IDs** — e.g., `auth-login-endpoint`, not `authLoginEndpoint`.
 
 ---
 
 ## Example
 
 ```json
-{{
-  "issues": [
-    {{
-      "id": "auth-epic",
-      "title": "User Authentication System",
-      "type": "epic",
-      "body": {{
-        "description": "Implement complete user authentication including JWT and session management.",
-        "goals": "- Secure API access\\n- Token refresh flow\\n- Role-based permissions"
-      }},
-      "labels": ["backend"],
-      "milestone": {f'"{config.milestones.milestones[0]}"' if config.milestones.milestones else 'null'},
-      "assignees": {f'["{config.assignees.assignees[0]}"]' if config.assignees.assignees else '[]'},
-      "project": {config.repo_info.projects[0].number if config.repo_info.projects else 'null'},
-      "children": [
-        {{
-          "id": "auth-login-story",
-          "title": "Login Flow",
-          "type": "story",
-          "body": {{
-            "description": "As a user, I want to log in so I can access my account.",
-            "acceptance_criteria": "- [ ] POST /auth/login returns JWT\\n- [ ] Invalid credentials return 401"
-          }},
-          "labels": ["backend"],
-          "milestone": {f'"{config.milestones.milestones[0]}"' if config.milestones.milestones else 'null'},
-          "assignees": [],
-          "project": null,
-          "children": [
-            {{
-              "id": "auth-login-endpoint",
-              "title": "Implement POST /auth/login endpoint",
-              "type": "task",
-              "body": {{
-                "description": "Create the login endpoint that validates credentials and returns a JWT pair."
-              }},
-              "labels": [],
-              "milestone": null,
-              "assignees": [],
-              "project": null,
-              "children": []
-            }}
-          ]
-        }}
-      ]
-    }}
-  ]
-}}
+{example_json}
 ```
 """
     return prompt
