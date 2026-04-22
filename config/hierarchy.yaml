@@ -1,0 +1,36 @@
+# Issue hierarchy — defines parent-child relationships between issue types
+# Levels are ordered from highest (root) to lowest (leaf)
+# Each level lists what child levels it can contain
+#
+# Customise this to match your workflow:
+#   - Add or remove levels as needed
+#   - Adjust can_have_children to define valid parent-child relationships
+
+hierarchy:
+  levels:
+    - name: epic
+      can_have_children:
+        - story
+        - task
+
+    - name: story
+      can_have_children:
+        - task
+        - subtask
+
+    - name: task
+      can_have_children:
+        - subtask
+
+    - name: subtask
+      can_have_children: []
+
+# How parent-child relationships are created on GitHub
+linking:
+  # sub_issues — uses GitHub's native sub-issues API (recommended, GA since 2025)
+  # body_reference — adds "Parent: #123" to child issue body
+  # task_list — adds "- [ ] #456" task list items to parent issue body
+  method: sub_issues
+
+  # Only used when method is body_reference:
+  # parent_prefix: "Parent: "

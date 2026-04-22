@@ -1,0 +1,30 @@
+# Auto-generated from repo — these are the labels available for issues
+
+labels:
+- name: frontend
+  color: 57c4bf
+  description: ''
+- name: backend
+  color: 3617c3
+  description: ''
+- name: database
+  color: '217943'
+  description: ''
+- name: devops
+  color: a8217d
+  description: ''
+- name: documentation
+  color: e1c886
+  description: ''
+- name: epic
+  color: 73eeb9
+  description: ''
+- name: story
+  color: 24240f
+  description: ''
+- name: task
+  color: cdabfe
+  description: ''
+- name: subtask
+  color: 9ed1cd
+  description: ''

@@ -1,0 +1,10 @@
+# Auto-generated from repo — GitHub native issue types available.
+# This file is always overwritten by gather-config.
+
+types:
+- name: Task
+  description: A specific piece of work
+- name: Bug
+  description: An unexpected problem or behavior
+- name: Feature
+  description: A request, idea, or new functionality
