@@ -32,6 +32,51 @@ def _extract_template_fields(template: str) -> set[str]:
     return set(re.findall(r"\{(\w+)\}", template))
 
 
+def _matched_hierarchy_types_from_labels(
+    issue: IssueInput,
+    config: ProjectConfig,
+) -> list[str]:
+    """Return hierarchy level keys matched by issue labels."""
+    label_map = config.get_hierarchy_label_map()  # type_key -> hierarchy_label
+    return [
+        type_key for type_key, hierarchy_label in label_map.items()
+        if hierarchy_label in issue.labels
+    ]
+
+
+def _resolve_issue_type(issue: IssueInput, config: ProjectConfig) -> tuple[str | None, str | None]:
+    """Resolve issue hierarchy type from explicit type or labels.
+
+    Returns (resolved_type, error_message).
+    """
+    valid_types = config.get_valid_type_keys()
+
+    if issue.type:
+        if issue.type in valid_types:
+            return issue.type, None
+        return None, f"Type '{issue.type}' does not exist as a hierarchy level in hierarchy.yaml"
+
+    # No explicit type: infer from hierarchy labels.
+    matched_types = _matched_hierarchy_types_from_labels(issue, config)
+
+    if len(matched_types) == 1:
+        return matched_types[0], None
+
+    if len(matched_types) == 0:
+        allowed = sorted(config.get_hierarchy_labels())
+        return None, (
+            "Issue type could not be inferred from labels. "
+            "Provide a valid 'type' or include exactly one hierarchy label. "
+            f"Hierarchy labels: {', '.join(allowed) if allowed else '(none configured)'}"
+        )
+
+    return None, (
+        "Issue type is ambiguous from labels. "
+        f"Matched multiple hierarchy labels for types: {', '.join(sorted(matched_types))}. "
+        "Keep exactly one hierarchy label or set 'type' explicitly."
+    )
+
+
 # ─── Structural Validation ──────────────────────────────────────────────────
 
 
@@ -101,18 +146,6 @@ def _validate_issue(
     seen_ids.add(issue.id)
     all_ids.add(issue.id)
 
-    # Type validation — type keys are hierarchy level names
-    valid_types = config.get_valid_type_keys()
-    if issue.type not in valid_types:
-        suggestions = _fuzzy_match(issue.type, valid_types)
-        result.add_error(
-            issue_id=issue.id,
-            field="type",
-            message=f"Type '{issue.type}' does not exist as a hierarchy level in hierarchy.yaml",
-            suggestion=f"Did you mean: {', '.join(suggestions)}?" if suggestions else None,
-            path=current_path,
-        )
-
     # Label validation
     valid_labels = config.get_valid_label_names()
     for label in issue.labels:
@@ -123,6 +156,53 @@ def _validate_issue(
                 field="labels",
                 message=f"Label '{label}' does not exist in labels.yaml",
                 suggestion=f"Did you mean: {', '.join(suggestions)}?" if suggestions else None,
+                path=current_path,
+            )
+
+    # Type resolution/validation — explicit type or inferred from hierarchy label
+    resolved_type, type_error = _resolve_issue_type(issue, config)
+    if type_error:
+        suggestion = None
+        if issue.type:
+            suggestions = _fuzzy_match(issue.type, config.get_valid_type_keys())
+            if suggestions:
+                suggestion = f"Did you mean: {', '.join(suggestions)}?"
+        result.add_error(
+            issue_id=issue.id,
+            field="type",
+            message=type_error,
+            suggestion=suggestion,
+            path=current_path,
+        )
+
+    # If type is explicit and hierarchy labels are present, they must agree.
+    if resolved_type and issue.type:
+        matched_types = _matched_hierarchy_types_from_labels(issue, config)
+        if len(matched_types) > 1:
+            result.add_error(
+                issue_id=issue.id,
+                field="labels",
+                message=(
+                    "Issue has multiple hierarchy labels, which is ambiguous: "
+                    f"{', '.join(sorted(matched_types))}."
+                ),
+                suggestion="Keep exactly one hierarchy label or remove hierarchy labels and rely on 'type'.",
+                path=current_path,
+            )
+        elif len(matched_types) == 1 and matched_types[0] != resolved_type:
+            expected_label = config.get_hierarchy_label_for_type(resolved_type)
+            result.add_error(
+                issue_id=issue.id,
+                field="labels",
+                message=(
+                    f"Hierarchy label implies type '{matched_types[0]}' but explicit type is '{resolved_type}'."
+                ),
+                suggestion=(
+                    f"Use hierarchy label '{expected_label}' for type '{resolved_type}', "
+                    "or change the type to match the label."
+                    if expected_label
+                    else None
+                ),
                 path=current_path,
             )
 
@@ -164,7 +244,7 @@ def _validate_issue(
             )
 
     # Body template field validation — templates now live on hierarchy levels
-    level = config.get_level_for_type(issue.type)
+    level = config.get_level_for_type(resolved_type) if resolved_type else None
     if level and level.body_template:
         expected_fields = _extract_template_fields(level.body_template)
         provided_fields = set(issue.body.keys())
@@ -175,7 +255,7 @@ def _validate_issue(
                 issue_id=issue.id,
                 field="body",
                 message=(
-                    f"Missing body fields for type '{issue.type}': "
+                    f"Missing body fields for type '{resolved_type}': "
                     f"{', '.join(sorted(missing))}"
                 ),
                 path=current_path,
@@ -185,18 +265,22 @@ def _validate_issue(
                 issue_id=issue.id,
                 field="body",
                 message=(
-                    f"Extra body fields for type '{issue.type}' "
+                    f"Extra body fields for type '{resolved_type}' "
                     f"(will be ignored): {', '.join(sorted(extra))}"
                 ),
                 path=current_path,
             )
 
     # Hierarchy validation for children
-    if issue.children:
-        parent_level = issue.type  # type key IS the level name now
+    if issue.children and resolved_type:
+        parent_level = resolved_type
 
         for child in issue.children:
-            child_level = child.type  # type key IS the level name
+            child_level, _ = _resolve_issue_type(child, config)
+
+            if not child_level:
+                # Child will get its own dedicated type error in recursion.
+                continue
 
             if not config.hierarchy.can_parent(parent_level, child_level):
                 parent_level_cfg = config.hierarchy.get_level(parent_level)
