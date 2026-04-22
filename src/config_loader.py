@@ -141,8 +141,42 @@ def validate_hierarchy(config: ProjectConfig) -> list[str]:
     valid_labels = config.get_valid_label_names()
     valid_github_types = config.get_valid_github_types()
     level_names = set(config.hierarchy.get_level_names())
+    hierarchy_labels_seen: dict[str, str] = {}
 
     for level in config.hierarchy.levels:
+        # Resolve hierarchy label for this level.
+        # Priority: explicit hierarchy_label -> level name (if label exists) -> first default label.
+        resolved_hierarchy_label = ""
+        if level.hierarchy_label:
+            resolved_hierarchy_label = level.hierarchy_label
+        elif level.name in valid_labels:
+            resolved_hierarchy_label = level.name
+        elif level.default_labels:
+            resolved_hierarchy_label = level.default_labels[0]
+
+        if level.hierarchy_label and level.hierarchy_label not in valid_labels:
+            errors.append(
+                f"Level '{level.name}' uses hierarchy_label '{level.hierarchy_label}' "
+                f"which does not exist in labels.yaml. "
+                f"Available labels: {', '.join(sorted(valid_labels)) or '(none)'}"
+            )
+
+        if not resolved_hierarchy_label:
+            errors.append(
+                f"Level '{level.name}' has no resolvable hierarchy label. "
+                "Set hierarchy_label, or add a label matching the level name, "
+                "or include at least one default_labels entry."
+            )
+        else:
+            existing_level = hierarchy_labels_seen.get(resolved_hierarchy_label)
+            if existing_level and existing_level != level.name:
+                errors.append(
+                    f"Hierarchy label '{resolved_hierarchy_label}' is used by multiple levels "
+                    f"('{existing_level}' and '{level.name}'). "
+                    "Each level must map to a unique hierarchy label."
+                )
+            hierarchy_labels_seen[resolved_hierarchy_label] = level.name
+
         # Validate default_labels exist in labels.yaml
         for label in level.default_labels:
             if label not in valid_labels:
