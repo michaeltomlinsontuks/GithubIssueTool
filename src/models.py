@@ -45,6 +45,11 @@ class HierarchyLevel(BaseModel):
     can_have_children: list[str] = Field(default_factory=list)
     title_prefix: str = ""
     default_labels: list[str] = Field(default_factory=list)
+    hierarchy_label: str = Field(
+        default="",
+        description="Primary label that identifies this hierarchy level. "
+                    "If omitted, the tool falls back to a label matching the level name.",
+    )
     body_template: str = ""
     github_type: str = Field(
         default="",
@@ -167,6 +172,44 @@ class ProjectConfig(BaseModel):
         """Get the hierarchy level config for a given type key."""
         return self.hierarchy.get_level(type_key)
 
+    def get_hierarchy_label_for_type(self, type_key: str) -> str:
+        """Resolve the canonical hierarchy label for a type key.
+
+        Resolution order:
+        1) level.hierarchy_label
+        2) label with same name as level (if it exists in labels.yaml)
+        3) first default_label (if present)
+        """
+        level = self.get_level_for_type(type_key)
+        if level is None:
+            return ""
+
+        valid_labels = self.get_valid_label_names()
+
+        if level.hierarchy_label:
+            return level.hierarchy_label
+
+        if level.name in valid_labels:
+            return level.name
+
+        if level.default_labels:
+            return level.default_labels[0]
+
+        return ""
+
+    def get_hierarchy_label_map(self) -> dict[str, str]:
+        """Return {type_key: hierarchy_label} for levels with a resolved label."""
+        mapping: dict[str, str] = {}
+        for level in self.hierarchy.levels:
+            label = self.get_hierarchy_label_for_type(level.name)
+            if label:
+                mapping[level.name] = label
+        return mapping
+
+    def get_hierarchy_labels(self) -> set[str]:
+        """Return all resolved hierarchy labels."""
+        return set(self.get_hierarchy_label_map().values())
+
 
 # ─── Issue Input Models ─────────────────────────────────────────────────────
 
@@ -175,7 +218,10 @@ class IssueInput(BaseModel):
     """A single issue from the AI-generated JSON. Recursive via children."""
     id: str = Field(..., description="Local reference key (not sent to GitHub)")
     title: str
-    type: str = Field(..., description="Must match a hierarchy level name")
+    type: Optional[str] = Field(
+        default=None,
+        description="Optional hierarchy level key. If omitted, the level is inferred from labels.",
+    )
     body: dict[str, str] = Field(
         default_factory=dict,
         description="Body fields matching template placeholders for the type",
