@@ -17,7 +17,7 @@
   "$defs": {
     "issue": {
       "type": "object",
-      "required": ["id", "title", "type", "body"],
+      "required": ["id", "title", "body"],
       "properties": {
         "id": {
           "type": "string",
@@ -30,9 +30,9 @@
           "description": "Issue title without type prefix"
         },
         "type": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1,
-          "description": "Issue type key from types.yaml"
+          "description": "Optional hierarchy level key (can be inferred from hierarchy labels)"
         },
         "body": {
           "type": "object",
