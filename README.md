@@ -7,7 +7,7 @@ AI-powered batch GitHub issue creation with configurable hierarchies, validation
 A Python CLI tool with a three-step pipeline:
 
 1. **`gather-config`** — Pulls milestones, labels, assignees, and projects from a GitHub repo via `gh` CLI → writes YAML config files  
-2. *(You manually edit `types.yaml` and `hierarchy.yaml` to define issue types, body templates, and parent-child rules)*  
+2. *(You manually edit `hierarchy.yaml` to define hierarchy levels, labels, body templates, and parent-child rules)*  
 3. **`generate-skill`** — Reads configs → produces an AI skill prompt with all valid values baked in  
 4. *(Give the skill to an AI — it outputs structured JSON)*  
 5. **`create-issues`** — Validates the JSON against configs, checks for duplicates, and creates issues in hierarchy order via `gh` CLI
@@ -47,13 +47,17 @@ This creates:
 - `config/milestones.yaml` — available milestones
 - `config/labels.yaml` — available labels with colors
 - `config/assignees.yaml` — users with push access
-- `config/types.yaml` — **starter template** (edit this!)
-- `config/hierarchy.yaml` — **starter template** (edit this!)
+- `config/types.yaml` — auto-detected GitHub native issue types (**read-only; auto-overwritten**)
+- `config/hierarchy.yaml` — **starter template** (edit this)
 
 ### Step 2: Edit Configs
 
-Edit `config/types.yaml` to define your issue types, body templates, and default labels.  
-Edit `config/hierarchy.yaml` to define parent-child relationships (e.g., epic → story → task → subtask).
+Edit `config/hierarchy.yaml` to define:
+- Hierarchy levels and parent-child relationships (e.g., epic → story → task → subtask)
+- `hierarchy_label` mappings (label-driven hierarchy semantics)
+- Title prefixes, body templates, default labels, and optional GitHub native type mapping
+
+`config/types.yaml` is auto-generated from GitHub and used only to validate `github_type` mappings.
 
 ### Step 3: Generate AI Skill
 
@@ -82,9 +86,10 @@ python -m src.cli create-issues issues.json --verbose
 ## Features
 
 - **Hierarchical Issues** — Epic → Story → Task → Sub-task (configurable)
+- **Label-Driven Hierarchy** — Hierarchy semantics come from labels (with optional explicit `type`)
 - **GitHub Sub-Issues** — Uses GitHub's native sub-issues API for parent-child linking
 - **Duplicate Detection** — Checks for existing issues with the same title before creating
-- **Body Templates** — Markdown templates with `{placeholder}` fields per issue type
+- **Body Templates** — Markdown templates with `{placeholder}` fields per hierarchy level
 - **GitHub Native Issue Types** — Supports GitHub's org-level issue types via the API
 - **Project Board Assignment** — Assign issues to GitHub Projects v2 boards
 - **Fuzzy Error Messages** — Misspelled labels/assignees get "Did you mean?" suggestions
@@ -98,12 +103,12 @@ python -m src.cli create-issues issues.json --verbose
     {
       "id": "auth-epic",
       "title": "User Authentication",
-      "type": "epic",
+      "type": null,
       "body": {
         "description": "Implement auth system",
         "goals": "- JWT tokens\n- OAuth2"
       },
-      "labels": ["backend"],
+      "labels": ["epic", "backend"],
       "milestone": "MVP Release",
       "assignees": ["username"],
       "project": 1,
@@ -111,9 +116,9 @@ python -m src.cli create-issues issues.json --verbose
         {
           "id": "login-story",
           "title": "Login Flow",
-          "type": "story",
+          "type": null,
           "body": { "description": "...", "acceptance_criteria": "..." },
-          "labels": [],
+          "labels": ["story"],
           "milestone": null,
           "assignees": [],
           "project": null,
