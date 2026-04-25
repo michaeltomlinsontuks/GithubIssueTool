@@ -2,15 +2,27 @@
 
 AI-powered batch GitHub issue creation with configurable hierarchies, validation, and the `gh` CLI.
 
+Runs as both a **CLI tool** and **MCP server** for agent integration.
+
 ## Overview
 
-A Python CLI tool with a three-step pipeline:
+A Python tool with two modes:
+
+### CLI Mode (3-step pipeline)
 
 1. **`gather-config`** — Pulls milestones, labels, assignees, and projects from a GitHub repo via `gh` CLI → writes YAML config files  
 2. *(You manually edit `hierarchy.yaml` to define hierarchy levels, labels, body templates, and parent-child rules)*  
 3. **`generate-skill`** — Reads configs → produces an AI skill prompt with all valid values baked in  
 4. *(Give the skill to an AI — it outputs structured JSON)*  
 5. **`create-issues`** — Validates the JSON against configs, checks for duplicates, and creates issues in hierarchy order via `gh` CLI
+
+### MCP Server Mode (agent-friendly)
+
+Exposes two tools via Model Context Protocol:
+- **gather-config** — Same as CLI, refreshes in-memory config cache
+- **create-issues** — Accept JSON issues directly, validate + create
+
+Config lives in `config/` (shared with CLI). In-memory cache keeps config fast across tool calls. Agent workflow: gather-config → create-issues.
 
 ## Prerequisites
 
@@ -137,6 +149,31 @@ python -m src.cli gather-config --repo owner/repo [-c ./config]
 python -m src.cli generate-skill [-c ./config] [-o skill/github_issues.md]
 python -m src.cli create-issues <input.json> [-c ./config] [--dry-run] [--verbose] [--skip-duplicate-check]
 ```
+
+## MCP Server
+
+Run the server:
+
+```bash
+mcp-server
+```
+
+Exposes tools:
+- **gather-config** — `repo` (required), `config_dir` (optional, default: `./config`)
+- **create-issues** — `issues` array (required), `config_dir`, `dry_run` (boolean, default: false)
+
+### Architecture
+
+**Config Cache** (`src/config_cache.py`):
+- Singleton in-memory cache for ProjectConfig objects
+- Loads from disk on first `get()` call
+- `refresh()` method reloads after gather-config
+- Thread-safe for concurrent tool calls
+
+**MCP Server** (`src/mcp_server.py`):
+- Standalone stdio-based MCP server
+- Shares config directory with CLI
+- No state loss; agents can work across tool calls
 
 ## Development
 
